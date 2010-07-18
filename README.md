@@ -44,11 +44,11 @@ for bulk upload, since the error reporting is not very good.
 
 For a dry run:
 
-    `./gcalfiltersplit -n ical.ics`
+    ./gcalfiltersplit -n ical.ics
 
 For the real thing:
 
-    `./gcalfiltersplit ical.ics`
+    ./gcalfiltersplit ical.ics
 
 gcaluploader
 ============
@@ -71,11 +71,11 @@ comprehensive logging and error reporting.
 
 For a dry run:
 
-    `./gcaluploader -n ical.ics`
+    ./gcaluploader -n ical.ics
 
 For the real thing:
 
-    `./gcaluploader ical.ics`
+    ./gcaluploader ical.ics
 
 
 Credits
