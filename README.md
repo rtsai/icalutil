@@ -23,30 +23,30 @@ Features
 Known Bugs
 ----------
 
-- `RDATE` and `EXRULE` components are not supported (do not appear to be used
-  by Palm Datebook).
+- `RDATE` and `EXRULE` components are not fully supported.
 - Events with many exceptions (80 or more `EXDATE` children) are rejected by
-  the Google Calendar API with an error message of "`RDATE too large`"; there
-  is no known workaround.
-- Use [batch requests]
+  the Google Calendar API with an error message of "`RDATE too large`"; the
+  `icalutil` tools do not provide any workaround.
+- The Google Calendar API [batch requests] mechanism is not used.
 
   [batch requests]: http://code.google.com/apis/calendar/data/2.0/developers_guide_protocol.html#batch
 
 gcalfiltersplit
 ===============
 
-Split up a single monolithic ICS file into smaller ones more manageable by the
-Google Calendar 'import' tool.
+Split up a single ICS file into smaller ones more manageable by the Google
+Calendar 'import' tool.
 
-The motivation for writing this was to use the 'import' tool to import smaller
-.ics files. However, it turns out that this process is also subject to Calendar
-API quotas, so it is actually not recommended for bulk upload, since the error
-reporting is not very good.
+The motivation for writing this was to use the Google Calendar 'import' tool to
+import smaller .ics files. However, it turns out that this 'import' is also
+subject to Google Calendar API quotas, so `gcalfiltersplit` is not recommended
+for bulk upload, since the error reporting is not very good.
 
 gcaluploader
 ============
 
-Read an iCalendar file and upload its events into Google Calendar.
+Read an iCalendar file and upload its events into Google Calendar, with
+comprehensive logging and error reporting.
 
 - Tracks and logs failed uploads so that individual entries may be examined
   offline for re-upload or manual entry.
