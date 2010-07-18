@@ -1,0 +1,7 @@
+#!/usr/bin/env python -u
+
+import sys
+import icalutil.googleutil
+
+if __name__ == '__main__':
+    sys.exit(icalutil.googleutil.filtersplit())
