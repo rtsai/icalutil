@@ -42,6 +42,14 @@ import smaller .ics files. However, it turns out that this 'import' is also
 subject to Google Calendar API quotas, so `gcalfiltersplit` is not recommended
 for bulk upload, since the error reporting is not very good.
 
+For a dry run:
+
+    `./gcalfiltersplit -n ical.ics`
+
+For the real thing:
+
+    `./gcalfiltersplit ical.ics`
+
 gcaluploader
 ============
 
@@ -60,6 +68,15 @@ comprehensive logging and error reporting.
     - Coalesce recurring daily all-day events into a single multi-day event.
     - Filter events with empty summary strings.
     - Workarounds for buggy Apple iCal.app import of Palm Desktop vCal export.
+
+For a dry run:
+
+    `./gcaluploader -n ical.ics`
+
+For the real thing:
+
+    `./gcaluploader ical.ics`
+
 
 Credits
 =======
