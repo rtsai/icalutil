@@ -45,31 +45,31 @@ def coalesce(vevent, inplace):
     multi-day event.
     '''
     if vevent.name != vobject.icalendar.VEvent.name:
-        return vevent                   # not a VEVENT component
+        return False                    # not a VEVENT component
 
     for dtattr in ['dtstart', 'dtend']:
         dtval = vevent.getChildValue(dtattr)
         if not dtval:
-            return vevent
+            return False
         if hasattr(dtval, 'time'):
-            return vevent               # timestamped; not all-day
+            return False                # timestamped; not all-day
 
     if vevent.getChildValue('exdate'):
-        return vevent                   # exceptions
+        return False                    # exceptions
 
     rruleValue = vevent.getChildValue('rrule')
     if not rruleValue:
-        return vevent                   # no recurrence
+        return False                    # no recurrence
 
     rruleparams = dict([kvp.upper().split('=', 1)
         for kvp in rruleValue.split(';')])
     if rruleparams.get(u'FREQ') != u'DAILY':
-        return vevent
+        return False
     if rruleparams.get(u'INTERVAL') != u'1':
-        return vevent
+        return False
     until = rruleparams.get(u'UNTIL')
     if not until:
-        return vevent
+        return False
 
     if inplace:
         newv = vevent
@@ -79,7 +79,7 @@ def coalesce(vevent, inplace):
     newv.dtend.value = datetime.datetime.strptime(rruleparams.get(u'UNTIL'),
         '%Y%m%d').date()
     del newv.rrule
-    return newv
+    return True
 
 
 def createcalendar(components):

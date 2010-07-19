@@ -53,6 +53,8 @@ def filterevent(vobj, opts):
         return True
     if vobj.name == vobject.icalendar.VEvent.name:
         memo = opts['memo']
+        filters = memo['filters']
+        transforms = memo['transforms']
         uid = vobj.getChildValue('uid')
         start_uid = opts.get('start_uid')
         if start_uid:
@@ -63,12 +65,11 @@ def filterevent(vobj, opts):
             del vobj.uid
         if opts['select_uids'] and uid not in opts['select_uids']:
             # Select UIDs
-            memo[uid] = 'selecting for UID'
             return False
         if not opts['accept_empty_summary'] and \
                 not vobj.getChildValue('summary', '').strip():
             # Reject events with empty summary strings.
-            memo[uid] = 'empty summary'
+            filters[uid] = 'empty summary'
             return False
         rrule = vobj.getChildValue('rrule')
         if rrule:
@@ -79,7 +80,7 @@ def filterevent(vobj, opts):
             freq = rruleparams[u'FREQ']
             if u'UNTIL' not in rruleparams and \
                     freq not in opts['accept_neverending_recurrences']:
-                memo[uid] = 'unending %s recurrence' % freq
+                filters[uid] = 'unending %s recurrence' % freq
                 return False
         if opts['enable_vcal_import_workaround_hack']:
             # All-day events (recurring and non-recurring) in a Palm vCal
@@ -91,13 +92,36 @@ def filterevent(vobj, opts):
                 td = dtend - dtstart
                 if td.days == 2 and td.seconds == 0 and td.microseconds == 0:
                     vobj.dtstart.value = dtstart + datetime.timedelta(days = 1)
+                    if not transforms.get(uid):
+                        transforms[uid] = []
+                    transforms[uid].append('vcal-import-workaround')
         if opts['coalesce_events']:
-            icalutil.coalesce(vobj, True)
+            if icalutil.coalesce(vobj, True):
+                if not transforms.get(uid):
+                    transforms[uid] = []
+                transforms[uid].append('coalesced %d days' %
+                    (vobj.getChildValue('dtend') -
+                    vobj.getChildValue('dtstart')).days)
+        if opts['truncate_exdates']:
+            # Keep the newest exdate children
+            exdates = [child for child in vobj.getChildren()
+                if child.name == u'EXDATE']
+            deco = [(exdate.value[0], exdate) for exdate in exdates]
+            deco.sort()
+            deco.reverse()      # descending date
+            remove = [d[1] for d in deco[opts['truncate_exdates']:]]
+            if remove:
+                for child in remove:
+                    vobj.remove(child)
+                if not transforms.get(uid):
+                    transforms[uid] = []
+                transforms[uid].append('truncated oldest %d exdate(s)' %
+                    len(remove))
         if opts['max_exdates']:
             exdates = [child for child in vobj.getChildren()
                 if child.name == u'EXDATE']
             if len(exdates) > opts['max_exdates']:
-                memo[uid] = '%d EXDATEs, max=%d' % \
+                filters[uid] = '%d EXDATEs, max=%d' % \
                     (len(exdates), opts['max_exdates'])
                 return False
         return True
@@ -119,19 +143,16 @@ def beforelogin():
 
 NEWLINE_RE = re.compile('[\r\n]')
 
-def beforeinsert(uploader, vevent, entry, arg):
+def beforeinsert(uploader, vevent, entry, uploadmemo):
     __pychecker__ = 'unusednames=uploader,vevent,entry'
     split = NEWLINE_RE.split(entry.title.text, 1)
     if split:
         title = split[0].strip()
     else:
         title = None
-    if entry.uid:
-        uid = entry.uid.value
-    else:
-        uid = 'No UID'
-    msg = 'Inserting %d/%d: %s (%s)' % (arg['inserts'] + 1, arg['end'], uid,
-        title)
+    uid = vevent.getChildValue('uid') or 'No UID'
+    msg = 'Inserting %d/%d: %s (%s)' % (uploadmemo['inserts'] + 1,
+        uploadmemo['end'], uid, title)
     if entry.when:
         msg += ' (%s)' % entry.when[0].start_time
     elif entry.recurrence:
@@ -140,12 +161,16 @@ def beforeinsert(uploader, vevent, entry, arg):
             ';'.join(entry.recurrence.text.split('\r\n')[
             0:3:2]).replace('TZID=America/Los_Angeles:', '').
             split(';')[0:3])
+    if uid:
+        reasons = uploadmemo['transforms'].get(uid)
+        if reasons:
+            msg += ' (%s)' % ','.join(reasons)
     log(msg)
 
 
-def afterinsert(uploader, vevent, entry, arg):
+def afterinsert(uploader, vevent, entry, uploadmemo):
     __pychecker__ = 'unusednames=uploader,vevent,entry'
-    arg['inserts'] += 1
+    uploadmemo['inserts'] += 1
 
 
 def eventexception(uploader, vevent, entry, e):
@@ -175,7 +200,7 @@ def eventexception(uploader, vevent, entry, e):
     raise e
 
 
-def eventfailed(uploader, vevent, memo, e):
+def eventfailed(uploader, vevent, uploadmemo, e):
     __pychecker__ = 'unusednames=uploader'
     uid = vevent.getChildValue('uid')
     eargs = e.args[0]
@@ -183,7 +208,7 @@ def eventfailed(uploader, vevent, memo, e):
         msg = eargs['reason']
     else:
         msg = str(e)
-    memo[uid] = msg
+    uploadmemo['fails'][uid] = msg
     log('Failed UID: %s (%s)' % (uid, msg))
     if eargs['status'] == 400 or \
             eargs['status'] == 409 and eargs['reason'] == 'Conflict':
@@ -242,13 +267,12 @@ def componentdt(component, tz):
     return calendar.timegm(tm)
 
 
-def reportfiltered(filtered, uids, memo):
+def reportuids(vevents, uids, reasons, verb):
     if uids:
-        log('Filtered %d UIDs (selecting %d UIDs)' % (len(filtered), len(uids)))
-    else:
-        for uid in [vobj.getChildValue('uid') for vobj in filtered]:
-            if uid in memo:
-                log('Filtered UID: %s (%s)' % (uid, memo[uid]))
+        log('%s %d UIDs (selecting %d UIDs)' % (verb, len(vevents), len(uids)))
+    for uid in [vobj.getChildValue('uid') for vobj in vevents]:
+        if uid in reasons:
+            log('%s UID: %s (%s)' % (verb, uid, reasons[uid]))
 
 
 def optparse_setdefaults(p, config):
@@ -403,13 +427,21 @@ def getoptions(description, config_file, config_vars):
                 'multi-day event.',
             )
         config.set(ConfigParser.DEFAULTSECT, 'coalesce_events', 'true')
+    if 'truncate_exdates' in config_vars:
+        p.add_option('--truncate-exdates',
+            type = 'int',
+            dest = 'truncate_exdates',
+            help = 'Keep the newest TRUNCATE-EXDATE recurrence exceptions, ' \
+                'discarding the older ones.',
+            )
+        config.set(ConfigParser.DEFAULTSECT, 'truncate_exdates', '0')
     if 'max_exdates' in config_vars:
-        p.add_option('-X', '--max-exdates',
+        p.add_option('--max-exdates',
             type = 'int',
             dest = 'max_exdates',
             help = 'Accept events with up to MAX-EXDATE recurrence exceptions.',
             )
-        config.set(ConfigParser.DEFAULTSECT, 'max_exdates', '80')
+        config.set(ConfigParser.DEFAULTSECT, 'max_exdates', '72')
     if 'accept_neverending_recurrences' in config_vars:
         p.add_option('-N', '--accept-neverending-recurrences',
             dest = 'accept_neverending_recurrences',
@@ -472,6 +504,9 @@ def getoptions(description, config_file, config_vars):
         opts['preserve_uids'] = getboolopt(options, config, 'preserve_uids')
     if 'coalesce_events' in config_vars:
         opts['coalesce_events'] = getboolopt(options, config, 'coalesce_events')
+    if 'truncate_exdates' in config_vars:
+        opts['truncate_exdates'] = options.truncate_exdates or \
+            getconfigint(config, 'truncate_exdates')
     if 'max_exdates' in config_vars:
         opts['max_exdates'] = options.max_exdates or \
             getconfigint(config, 'max_exdates')
@@ -497,6 +532,12 @@ def splitcb(cal, arg):
         raise EnvironmentError(errno.EEXIST, os.strerror(errno.EEXIST), newpath)
     events = [c for c in cal.components()
         if c.name == vobject.icalendar.VEvent.name]
+    splitmemo = arg['splitmemo']
+    for event in events:
+        uid = event.getChildValue('uid')
+        reasons = splitmemo['transforms'].get(uid)
+        if uid and reasons:
+            log('Transformed UID %s: %s' % (uid, ','.join(reasons)))
     newsize = 0
     if not arg['dry_run']:
         f = open(newpath, 'w')
@@ -523,6 +564,7 @@ def filtersplit():
             'select_uids',
             'preserve_uids',
             'coalesce_events',
+            'truncate_exdates',
             'max_exdates',
             'accept_neverending_recurrences',
             'accept_empty_summary',
@@ -555,13 +597,20 @@ def filtersplit():
             deco = None
         finally:
             f.close()
-        memo = {}
+        splitmemo = {
+            'filters': {},
+            'transforms': {},
+        }
         filteropts = copy.copy(opts)
-        filteropts['memo'] = memo
+        filteropts['memo'] = splitmemo
         filtered = icalutil.filtercomponents(ical, filterevent, filteropts)
-        reportfiltered(filtered, opts['select_uids'], memo)
+        reportuids(filtered, opts['select_uids'], splitmemo['filters'],
+            'Filtered')
         newnevents = len([c for c in ical.components()
             if c.name == vobject.icalendar.VEvent.name])
+        if not newnevents:
+            log('No events!')
+            return 0
         # Reduce filesize by filtered events
         oldfilesize = os.path.getsize(filename) * newnevents / nevents
         # Guess number of events in each sub-calendarfile
@@ -571,6 +620,7 @@ def filtersplit():
             'filename': filename,
             'splits': 0,
             'dry_run': opts['dry_run'],
+            'splitmemo': splitmemo,
         }
         try:
             icalutil.splitcal(ical,
@@ -604,6 +654,7 @@ def upload():
             'select_uids',
             'preserve_uids',
             'coalesce_events',
+            'truncate_exdates',
             'max_exdates',
             'accept_neverending_recurrences',
             'accept_empty_summary',
@@ -647,25 +698,28 @@ def upload():
             components = [pair[1] for pair in deco]
             components.reverse()    # Descending dtstart
             ical = icalutil.createcalendar(components)
-            insertarg = {
-                'inserts': 0,
-                'end': nevents,
-            }
-            eventcallbacks['beforeinsertarg'] = insertarg
-            eventcallbacks['afterinsertarg'] = insertarg
             components = None
             deco = None
         finally:
             f.close()
-        memo = {}
-        eventcallbacks['eventfailedarg'] = memo
+        uploadmemo = {
+            'inserts': 0,
+            'end': nevents,
+            'fails': {},
+            'filters': {},
+            'transforms': {},
+        }
+        eventcallbacks['beforeinsertarg'] = uploadmemo
+        eventcallbacks['afterinsertarg'] = uploadmemo
+        eventcallbacks['eventfailedarg'] = uploadmemo
         filteropts = copy.copy(opts)
-        filteropts['memo'] = memo
+        filteropts['memo'] = uploadmemo
         filtered = icalutil.filtercomponents(ical, filterevent, filteropts)
-        reportfiltered(filtered, opts['select_uids'], memo)
+        reportuids(filtered, opts['select_uids'], uploadmemo['filters'],
+            'Filtered')
         nevents = len([c for c in ical.components()
             if c.name == vobject.icalendar.VEvent.name])
-        insertarg['end'] = nevents
+        uploadmemo['end'] = nevents
         failed = []
         start = int(time.time())
         try:
@@ -689,10 +743,12 @@ def upload():
             log('https://www.google.com/%s/UnlockCaptcha' % path)
             raise
         finally:
-            reportfiltered(filtered, opts['select_uids'], memo)
+            reportuids(filtered, opts['select_uids'], uploadmemo['filters'],
+                'Filtered')
+            reportuids(filtered, None, uploadmemo['transforms'], 'Transformed')
             for uid in [vevent.getChildValue('uid') for vevent in failed]:
-                log('Failed UID: %s (%s)' % (uid, memo[uid]))
-            log('Inserted %d event(s)' % insertarg['inserts'])
+                log('Failed UID: %s (%s)' % (uid, uploadmemo['fails'][uid]))
+            log('Inserted %d event(s)' % uploadmemo['inserts'])
             log('Elapsed time: %d second(s)' % (int(time.time()) - start))
 
     return 0

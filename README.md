@@ -24,9 +24,13 @@ Known Bugs
 ----------
 
 - `RDATE` and `EXRULE` components are not fully supported.
-- Events with many exceptions (80 or more `EXDATE` children) are rejected by
-  the Google Calendar API with an error message of "`RDATE too large`"; the
-  `icalutil` tools do not provide any workaround.
+- Google Calendar only provides about 720 recurrences for recurring events (or
+  two years, for a DAILY event). A workaround would be to duplicate the
+  recurring event until the present time is reached.
+- Events with many exceptions (empirically observed to be around 72 or more
+  `EXDATE` children) are rejected by the Google Calendar API with an error
+  message of "`RDATE too large`"; the `icalutil` tools do not provide any
+  workaround.
 - The Google Calendar API [batch requests] mechanism is not used.
 
   [batch requests]: http://code.google.com/apis/calendar/data/2.0/developers_guide_protocol.html#batch
